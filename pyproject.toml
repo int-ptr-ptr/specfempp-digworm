@@ -1,0 +1,62 @@
+[project]
+name = "specfempp-digworm"
+version = "0.1.0"
+description = "Tools used by int-ptr-ptr in the development and research of dG"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = ["numpy", "matplotlib", "nox"]
+
+[dependency-groups]
+dev = ["ruff", "pre-commit", "pydocstringformatter"]
+mesher = ["gmsh", "rtree"]
+
+[build-system]
+requires = ["uv_build~=0.7.19"]
+build-backend = "uv_build"
+
+
+[tool.uv.build-backend]
+module-root = "src/python"
+
+
+[tool.ruff]
+line-length = 80
+
+[tool.ruff.lint]
+extend-select = [
+  "B",           # flake8-bugbear
+  "I",           # isort
+  "ARG",         # flake8-unused-arguments
+  "C4",          # flake8-comprehensions
+  "EM",          # flake8-errmsg
+  "ICN",         # flake8-import-conventions
+  "ISC",         # flake8-implicit-str-concat
+  "G",           # flake8-logging-format
+  "PGH",         # pygrep-hooks
+  "PIE",         # flake8-pie
+  "PL",          # pylint
+  "PT",          # flake8-pytest-style
+  "PTH",         # flake8-use-pathlib
+  "RET",         # flake8-return
+  "RUF",         # Ruff-specific
+  "SIM",         # flake8-simplify
+  "T20",         # flake8-print
+  "UP",          # pyupgrade
+  "YTT",         # flake8-2020
+  "EXE",         # flake8-executable
+  "NPY",         # NumPy specific rules
+  "PD",          # pandas-vet
+]
+
+[tool.ruff.lint.per-file-ignores]
+"results/**" = ["T201"]
+
+[tool.pydocstringformatter]
+write = true
+max-line-length = 80
+# linewrap-full-docstring = true
+
+# style = "numpydoc"
+
+# strip-whitespaces = true
+# split-summary-body = true

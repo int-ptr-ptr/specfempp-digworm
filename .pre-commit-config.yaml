@@ -1,0 +1,35 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: "v4.3.0"
+    hooks:
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      - id: check-symlinks
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+      - id: requirements-txt-fixer
+      - id: trailing-whitespace
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: "v19.1.7"
+    hooks:
+      - id: clang-format
+        types_or: [c++]
+        files: \.(c|cc|cxx|cpp|h|hpp|hxx|tpp)$
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    # Ruff version.
+    rev: v0.9.1
+    hooks:
+      # Run the linter.
+      - id: ruff
+        types_or: [ python, pyi ]
+        args: [ --fix ]
+        exclude: ^scripts/.*\.py
+      # Run the formatter.
+      - id: ruff-format
+        types_or: [ python, pyi ]
+        exclude: ^scripts/.*\.py
+  - repo: https://github.com/DanielNoord/pydocstringformatter
+    rev: 0.7.5
+    hooks:
+      - id: pydocstringformatter
