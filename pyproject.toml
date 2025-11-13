@@ -16,7 +16,7 @@ build-backend = "uv_build"
 
 
 [tool.uv.build-backend]
-module-root = "src/python"
+module-root = "src/"
 
 
 [tool.ruff]
