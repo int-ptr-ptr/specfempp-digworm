@@ -1,5 +1,9 @@
+[build-system]
+requires = ["scikit-build-core>=0.11", "pybind11>=3.0"]
+build-backend = "scikit_build_core.build"
+
 [project]
-name = "specfempp-digworm"
+name = "specfempp_digworm"
 version = "0.1.0"
 description = "Tools used by int-ptr-ptr in the development and research of dG"
 readme = "README.md"
@@ -7,16 +11,44 @@ requires-python = ">=3.13"
 dependencies = ["numpy", "matplotlib", "nox"]
 
 [dependency-groups]
-dev = ["ruff", "pre-commit", "pydocstringformatter"]
+dev = ["ruff", "pre-commit", "pydocstringformatter", "ipykernel"]
 mesher = ["gmsh", "rtree"]
 
-[build-system]
-requires = ["uv_build~=0.7.19"]
-build-backend = "uv_build"
+[tool.scikit-build]
+build-dir = "./build"
+build.verbose = true
+logging.level = "INFO"
+cmake.args = [
+  "-D CMAKE_C_COMPILER=/usr/bin/gcc-13",
+  "-D CMAKE_CXX_COMPILER=/usr/bin/g++-13",
+  "-D CMAKE_Fortran_COMPILER=/usr/bin/gfortran-13"
+]
 
 
-[tool.uv.build-backend]
-module-root = "src/"
+[tool.scikit-build.cmake.define]
+CMAKE_BUILD_TYPE = "Debug"
+
+[tool.scikit-build.sdist]
+cmake = true
+include = [
+  "pybind11/tools",
+  "pybind11/include",
+  "pybind11/CMakeLists.txt",
+]
+
+[tool.cibuildwheel]
+build-frontend = "build[uv]"
+enable = ["pypy"]
+test-command = "python -m pytest tests"
+test-sources = ["pyproject.toml", "tests"]
+test-groups = ["test"]
+
+
+# requires = ["uv_build~=0.7.19"]
+# build-backend = "uv_build"
+
+# [tool.uv.build-backend]
+# module-root = "src/"
 
 
 [tool.ruff]
