@@ -210,3 +210,10 @@ __marimo__/
 # Project specific
 
 playground/
+
+
+# remove this for now
+
+uv.lock
+digworm_config.yaml
+digworm_config.yml

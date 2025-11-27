@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Tools used by int-ptr-ptr in the development and research of dG"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = ["numpy", "matplotlib", "nox"]
+dependencies = ["numpy", "matplotlib", "nox", "pyyaml"]
 
 [dependency-groups]
 dev = ["ruff", "pre-commit", "pydocstringformatter"]
