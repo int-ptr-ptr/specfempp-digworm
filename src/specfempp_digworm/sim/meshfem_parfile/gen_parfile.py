@@ -105,7 +105,7 @@ class MeshConfiguration:
     receivers: Collection[ReceiverSeries]
     materials: Collection[MaterialModel]
     output_folder: str | PathLike
-    database_output_folder: str | PathLike
+    database_output_file: str | PathLike
     stations_filename: str | PathLike
     tomography_file: str | PathLike
     external_mesher_files: ExternalMesherFileConfig | None
@@ -123,7 +123,7 @@ class MeshConfiguration:
 title                           = {self.title}
 NPROC                           = {self.nproc}\n
 OUTPUT_FILES                   = {self.output_folder:s}
-database_filename               = {self.database_output_folder:s}
+database_filename               = {self.database_output_file:s}
 
 PARTITIONING_TYPE               = 3
 NGNOD                           = 9
@@ -134,7 +134,7 @@ rec_normal_to_surface           = .false.
 {"".join(str(rec) for rec in self.receivers)}
 stations_filename              = {self.stations_filename:s}
 nbmodels                        = {len(self.materials)}
-{"\n".join(model.material_string(i) for i, model in enumerate(self.materials))}
+{"\n".join(model.material_string(i + 1) for i, model in enumerate(self.materials))}
 TOMOGRAPHY_FILE                 = {self.tomography_file}
 read_external_mesh              = {bool_to_fortstr(self.external_mesher_files is not None)}
 {exteral_mesh.param_string()}

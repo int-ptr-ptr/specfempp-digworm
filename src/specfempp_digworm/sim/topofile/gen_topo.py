@@ -16,7 +16,7 @@ class TopographyConfig:
     def export(self, topofile: str | PathLike):
         with Path(topofile).open("w") as f:
             # num interfaces
-            f.write(f"{self.num_layers}\n")
+            f.write(f"{self.num_layers + 1}\n")
             for layerbd in self.points_per_layerbd:
                 # for each interface: print number of points, followed by points
                 f.write(f"{len(layerbd)}\n")
