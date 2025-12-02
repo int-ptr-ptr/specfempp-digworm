@@ -1,0 +1,34 @@
+import reload_configurations
+import setup_sims
+
+reload_configurations.reload()
+
+rule all:
+  input:
+    "sims/0_20_20_0x01_False/specfem_log.txt",
+    "sims/1_20_20_0x01_False/specfem_log.txt",
+    "sims/2_20_20_0x01_False/specfem_log.txt"
+
+rule init_mesher:
+  input:
+    "configurations/config_{iconf}.yaml",
+    "setup_sims.py"
+  output:
+    "sims/{iconf}_20_20_0x01_False/database.bin"
+  run:
+    conf = setup_sims.test_config_from_confindex(wildcards.iconf, nx_above=20, nx_below=20, dt=0.01, do_nonconforming=False)
+    conf.write_topofile()
+    conf.write_meshfem_parfile()
+    conf.write_specfem_parfile()
+    conf.generate_mesh()
+    conf.run_sim()
+
+rule run_mesher:
+  input:
+    "sims/{iconf}_20_20_0x01_False/database.bin"
+  output:
+    "sims/{iconf}_20_20_0x01_False/specfem_log.txt"
+  run:
+    conf = setup_sims.test_config_from_confindex(wildcards.iconf, nx_above=20, nx_below=20, dt=0.01, do_nonconforming=False)
+    conf.run_sim()
+  

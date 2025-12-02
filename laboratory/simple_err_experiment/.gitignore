@@ -1,6 +1,5 @@
-OUTPUT_FILES/
-database.bin
-Par_file
-STATIONS
-topo.dat
-specfem_config.yaml
+configurations
+sims
+outputs
+
+.snakemake

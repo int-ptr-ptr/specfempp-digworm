@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from yaml import Loader, load
 
 from specfempp_digworm.config.config import get_config
 from specfempp_digworm.sim.meshfem_parfile.external_mesh_config import (
@@ -17,6 +18,7 @@ from specfempp_digworm.sim.meshfem_parfile.gen_parfile import (
 )
 from specfempp_digworm.sim.source import (
     ForcingFunction,
+    SourceConfiguration,
     SourceType,
 )
 from specfempp_digworm.sim.specfem_parfile.gen_parfile import (
@@ -30,6 +32,7 @@ from specfempp_digworm.sim.specfem_parfile.gen_parfile import (
 from specfempp_digworm.sim.topofile.gen_topo import TopographyConfig
 
 labdir = Path(__file__).parent
+config_folder = labdir / "configurations"
 # topofile_dir = labdir / "topofiles"
 
 SIM_XMIN = -np.pi
@@ -42,20 +45,21 @@ class SimpleErrExperimentConfiguration:
     ymin: float
     ymax: float
     a0: float
-    Nx_below: int
-    Nx_above: int
+    nx_below: int
+    nx_above: int
     vp_below: float
     vs_below: float
     vp_above: float
     source_f0: float
     dt: float
     num_steps: int
+    steps_between_wavefield_write: int
     is_nonconforming: bool
     workfol: Path
 
     def __post_init__(self):
         if not self.is_nonconforming:
-            assert self.Nx_above == self.Nx_below, (
+            assert self.nx_above == self.nx_below, (
                 "is_nonconforming = False, but Nx is not the same for "
                 "above and below"
             )
@@ -87,6 +91,7 @@ class SimpleErrExperimentSimulation:
     _material_elastic: MaterialModelAcousticElastic
     _material_acoustic: MaterialModelAcousticElastic
     _receiver_sets: list[ReceiverSeries]
+    _sources: list[SourceConfiguration]
 
     _mesh_config: "SimpleErrExperimentSimulation.MeshConfig"
     _external_mesh_file_config: ExternalMesherFileConfig | None
@@ -111,7 +116,12 @@ class SimpleErrExperimentSimulation:
     def specfem_parfile(self):
         return self.work_folder / self._specfem_config_filename
 
-    def __init__(self, config: SimpleErrExperimentConfiguration):
+    def __init__(
+        self,
+        config: SimpleErrExperimentConfiguration,
+        receivers: list[ReceiverSeries],
+        source_locations: list[tuple[float, float]],
+    ):
         self._config = config
         self._topofile_name = "topo.dat"
         self._parfile_name = "Par_file"
@@ -124,10 +134,7 @@ class SimpleErrExperimentSimulation:
         self._material_acoustic = MaterialModelAcousticElastic(
             rho=1, vp=self._config.vp_above, vs=0
         )
-        self._receiver_sets = [
-            # TODO
-            ReceiverSeries(nrec=1, xdeb=0, zdeb=0, xfin=0, zfin=0),
-        ]
+        self._receiver_sets = receivers
 
         xlow = SIM_XMIN
         xhigh = SIM_XMAX
@@ -138,18 +145,18 @@ class SimpleErrExperimentSimulation:
             ymin=self._config.ymin,
             ymax=self._config.ymax,
             is_nonconforming=self._config.is_nonconforming,
-            nx_below=self._config.Nx_below,
-            nx_above=self._config.Nx_above,
+            nx_below=self._config.nx_below,
+            nx_above=self._config.nx_above,
             nz_below=int(
                 np.round(
-                    self._config.Nx_below
+                    self._config.nx_below
                     / (SIM_XMAX - SIM_XMIN)
                     * abs(self._config.ymin)
                 )
             ),
             nz_above=int(
                 np.round(
-                    self._config.Nx_above
+                    self._config.nx_above
                     / (SIM_XMAX - SIM_XMIN)
                     * self._config.ymax
                 )
@@ -164,6 +171,18 @@ class SimpleErrExperimentSimulation:
             if self._mesh_config.is_nonconforming
             else None
         )
+
+        self._sources = [
+            SourceType.FORCE(
+                x=x,
+                z=z,
+                forcing_function=ForcingFunction.RICKER,
+                factor=1.0,
+                tshift=0.0,
+                f0=self._config.source_f0,
+            )
+            for x, z in source_locations
+        ]
 
     def write_topofile(self, overwrite: bool = True):
         if self.topography_file.exists() and not overwrite:
@@ -258,19 +277,12 @@ class SimpleErrExperimentSimulation:
             ),
             display_config=None,
             wavefield_config=WavefieldOutputConfiguration(
-                output_format="HDF5", output_folder="OUTPUT_FILES/wavefield"
+                steps_between_store=self._config.steps_between_wavefield_write,
+                output_format="HDF5",
+                output_folder="OUTPUT_FILES/wavefield",
             ),
             sources_config=SimulationSourcesConfiguration(
-                source_list=[
-                    SourceType.FORCE(
-                        x=0,
-                        z=0,
-                        forcing_function=ForcingFunction.RICKER,
-                        factor=1.0,
-                        tshift=0.0,
-                        f0=self._config.source_f0,
-                    )
-                ]
+                source_list=self._sources
             ),
             database_input_file=self._database_filename,
         )
@@ -336,35 +348,80 @@ class SimpleErrExperimentSimulation:
 
         config = get_config(self.work_folder)
         specfem_bin: Any = config["specfem-external", "bin"]
-        subprocess.run(
-            [
-                str(Path(specfem_bin) / "specfem2d"),
-                "-p",
-                str(self._specfem_config_filename),
-            ],
-            cwd=self.work_folder,
-            check=True,
-        )
+        with (self.work_folder / "specfem_log.txt").open("w") as f:
+            subprocess.run(
+                [
+                    str(Path(specfem_bin) / "specfem2d"),
+                    "-p",
+                    str(self._specfem_config_filename),
+                ],
+                cwd=self.work_folder,
+                stdout=f,
+                stderr=subprocess.STDOUT,
+                check=True,
+            )
 
 
-if __name__ == "__main__":
-    test_config = SimpleErrExperimentSimulation(
+def test_config_fol_from_confindex(
+    iconf: int,
+    *,
+    nx_below: int,
+    nx_above: int,
+    dt: float,
+    do_nonconforming: bool,
+):
+    return labdir / (
+        f"sims/{iconf}_{nx_below}_{nx_above}_"
+        f"{str(dt).replace('.', 'x')}_{do_nonconforming}"
+    )
+
+
+def test_config_from_confindex(
+    iconf: int,
+    *,
+    nx_below: int,
+    nx_above: int,
+    dt: float,
+    do_nonconforming: bool,
+):
+    config_file = config_folder / f"config_{iconf}.yaml"
+    with config_file.open("r") as f:
+        loaded_config = load(f, Loader=Loader)
+
+    num_steps = int(np.ceil(float(loaded_config["tmax"]) / dt))
+    source_f0 = float(loaded_config["source_f0"])
+    dump_dt = 1e-2 / source_f0
+    dump_nstep = int(max(1, np.floor(dump_dt / dt)))
+
+    return SimpleErrExperimentSimulation(
         SimpleErrExperimentConfiguration(
-            harmonic=1,
+            harmonic=int(loaded_config["harmonic"]),
             ymin=-np.pi,
             ymax=np.pi,
-            a0=1,
-            Nx_below=20,
-            Nx_above=30,
-            vp_below=1,
-            vs_below=0.6,
-            vp_above=0.5,
-            source_f0=1,
-            dt=0.01,
-            num_steps=100,
-            is_nonconforming=True,
-            workfol=labdir / "_test_sim",
-        )
+            a0=float(loaded_config["a0"]),
+            nx_below=nx_below,
+            nx_above=nx_above,
+            vp_below=float(loaded_config["vp_below"]),
+            vs_below=float(loaded_config["vs_below"]),
+            vp_above=float(loaded_config["vp_above"]),
+            source_f0=source_f0,
+            dt=dt,
+            num_steps=num_steps,
+            steps_between_wavefield_write=dump_nstep,
+            is_nonconforming=do_nonconforming,
+            workfol=test_config_fol_from_confindex(
+                iconf=iconf,
+                nx_below=nx_below,
+                nx_above=nx_above,
+                dt=dt,
+                do_nonconforming=do_nonconforming,
+            ),
+        ),
+        receivers=[
+            ReceiverSeries.from_dict(d) for d in loaded_config["receivers"]
+        ],
+        source_locations=[
+            (float(loc["x"]), float(loc["z"]))
+            for loc in loaded_config["source_locations"]
+        ],
     )
-    test_config.generate_mesh()
-    test_config.run_sim()

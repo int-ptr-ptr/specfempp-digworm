@@ -48,6 +48,7 @@ class DisplayConfiguration:
 
 @dataclass
 class WavefieldOutputConfiguration:
+    steps_between_store: int
     output_format: str = "HDF5"
     output_folder: str = "OUTPUT_FILES/wavefield"
 
@@ -55,6 +56,7 @@ class WavefieldOutputConfiguration:
         return {
             "format": self.output_format,
             "directory": self.output_folder,
+            "time_interval": self.steps_between_store,
         }
 
 
