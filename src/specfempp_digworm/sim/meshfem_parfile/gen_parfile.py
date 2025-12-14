@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from collections.abc import Collection
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from os import PathLike
 from pathlib import Path
 from typing import override
@@ -26,6 +26,23 @@ xfin                            = {self.xfin:f}
 zfin                            = {self.zfin:f}
 record_at_surface_same_vertical = .{str(self.record_at_surface_same_vertical).lower()}.
       """
+
+    def to_dict(self):
+        return asdict(self)
+
+    @staticmethod
+    def from_dict(series_dict: dict):
+        if "nrec" in series_dict and not isinstance(series_dict["nrec"], int):
+            series_dict["nrec"] = int(series_dict["nrec"])
+        if "xdeb" in series_dict and not isinstance(series_dict["xdeb"], float):
+            series_dict["xdeb"] = int(series_dict["xdeb"])
+        if "zdeb" in series_dict and not isinstance(series_dict["zdeb"], float):
+            series_dict["zdeb"] = int(series_dict["zdeb"])
+        if "xfin" in series_dict and not isinstance(series_dict["xfin"], float):
+            series_dict["xfin"] = int(series_dict["xfin"])
+        if "zfin" in series_dict and not isinstance(series_dict["zfin"], float):
+            series_dict["zfin"] = int(series_dict["zfin"])
+        return ReceiverSeries(**series_dict)
 
 
 @dataclass(frozen=True)
@@ -105,7 +122,7 @@ class MeshConfiguration:
     receivers: Collection[ReceiverSeries]
     materials: Collection[MaterialModel]
     output_folder: str | PathLike
-    database_output_folder: str | PathLike
+    database_output_file: str | PathLike
     stations_filename: str | PathLike
     tomography_file: str | PathLike
     external_mesher_files: ExternalMesherFileConfig | None
@@ -123,7 +140,7 @@ class MeshConfiguration:
 title                           = {self.title}
 NPROC                           = {self.nproc}\n
 OUTPUT_FILES                   = {self.output_folder:s}
-database_filename               = {self.database_output_folder:s}
+database_filename               = {self.database_output_file:s}
 
 PARTITIONING_TYPE               = 3
 NGNOD                           = 9
@@ -134,7 +151,7 @@ rec_normal_to_surface           = .false.
 {"".join(str(rec) for rec in self.receivers)}
 stations_filename              = {self.stations_filename:s}
 nbmodels                        = {len(self.materials)}
-{"\n".join(model.material_string(i) for i, model in enumerate(self.materials))}
+{"\n".join(model.material_string(i + 1) for i, model in enumerate(self.materials))}
 TOMOGRAPHY_FILE                 = {self.tomography_file}
 read_external_mesh              = {bool_to_fortstr(self.external_mesher_files is not None)}
 {exteral_mesh.param_string()}

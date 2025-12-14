@@ -1,6 +1,7 @@
 import contextlib
 import copy
 import re
+from os import PathLike
 from pathlib import Path
 from typing import Literal, overload
 
@@ -9,25 +10,58 @@ from yaml import Loader, load
 _VALID_CONFIG_FILE_NAMES = ["digworm_config.yaml", "digworm_config.yml"]
 
 
-def _read_default_config_files():
+def get_config_file_list(path: Path) -> list[Path]:
+    """Returns a list of configuration files that would affect a given path.
+    The list is ordered from highest to lowest priority, where a higher priority
+    entry will overwrite a lower priority entry.
+
+    Args:
+        path (Path): The working directory for a configuration
+
+    Returns:
+        list[Path]: The list of config files.
+    """
+    path = path.absolute()
+    config_files = []
+    # do while (path has parent)
+    while True:
+        # does path have a valid configuration file?
+        for cfg_fname in _VALID_CONFIG_FILE_NAMES:
+            with contextlib.suppress(OSError):
+                check = path / cfg_fname
+                if check.is_file():
+                    # yes.
+                    config_files.append(check)
+
+                # expect only one config file per directory
+                break
+
+        if len(path.parts) <= 1:
+            break
+
+        path = path.parent
+    return config_files
+
+
+def _read_default_config_files(
+    path: Path | None = None, *, config_file_list: list[Path] | None = None
+):
     from ._defaults import _config_defaults  # noqa: PLC0415
 
     config = copy.deepcopy(_config_defaults)
 
-    config_search = Path.cwd()
-    # search directories for configuration file (trace up)
-    # files further down have priority (overwrites config)
+    config_search = Path.cwd() if path is None else path
+    # search directories for configuration file (trace up to root)
+    # files in subdirectories have priority (overwrites config)
 
     def recursive_update(entry, new_entry):
-
         # for now, assume entry is a dictionary, since we don't
         # support advanced list manipulation
         assert isinstance(entry, dict)
         assert isinstance(new_entry, dict)
 
         if isinstance(new_entry, dict):
-
-            for k,v in new_entry.items():
+            for k, v in new_entry.items():
                 if k not in entry:
                     entry[k] = v
                     continue
@@ -41,26 +75,18 @@ def _read_default_config_files():
                     # just append for now
                     entry[k].extend(v)
                     continue
-                
+
                 # perhaps add more advanced type-checking in the future?
                 entry[k] = v
 
-    def find_config_in_dir(parent):
-        for cfg_fname in _VALID_CONFIG_FILE_NAMES:
-            with contextlib.suppress(OSError):
-                check = parent / cfg_fname
-                if check.is_file():
-                    with check.open() as f:
-                        recursive_update(config, load(f, Loader))
-
-                    # expect only one of parent / _VALID_CONFIG_FILE_NAMES
-                    # to exist.
-                    break
-
-    for parent in reversed(config_search.parents):
-        find_config_in_dir(parent)
-
-    find_config_in_dir(config_search)
+    files_to_load = (
+        get_config_file_list(config_search)
+        if config_file_list is None
+        else config_file_list
+    )
+    for config_file in reversed(files_to_load):
+        with config_file.open() as f:
+            recursive_update(config, load(f, Loader))
 
     return config
 
@@ -207,7 +233,7 @@ class ConfigurationNode:
         except ValueError as e:
             if self._parent is None:
                 raise e
-        
+
         # try one level up. This will only be called if ValueError was raised,
         # but we put it here to clear out the traceback
         return self._parent.resolve_name(
@@ -215,6 +241,11 @@ class ConfigurationNode:
             return_full_namespace=return_full_namespace,
             substitute_references=substitute_references,
         )
+
+    def __getitem__(self, indices: tuple[str, ...] | str):
+        if isinstance(indices, tuple) and len(indices) == 1:
+            indices = indices[0]
+        return self.resolve_name(indices)
 
     def _expand_references(
         self,
@@ -253,7 +284,10 @@ class ConfigurationNode:
             # this may also have references. append to stack to prevent circular
             already_expanded_refs.append(namespace)
             parent_of_subs = self.resolve_name(repl_full_ns[:-1])
-            assert isinstance(parent_of_subs, ConfigurationNode), (repl_full_ns, parent_of_subs)
+            assert isinstance(parent_of_subs, ConfigurationNode), (
+                repl_full_ns,
+                parent_of_subs,
+            )
             repl = parent_of_subs._expand_references(
                 repl, already_expanded_refs
             )
@@ -265,4 +299,23 @@ class ConfigurationNode:
         return strcontent
 
 
-config = ConfigurationNode(_read_default_config_files())
+_configs: dict[str, ConfigurationNode] = {}
+
+
+def get_config(
+    working_directory: str | PathLike | None = None,
+) -> ConfigurationNode:
+    if working_directory is None:
+        config_file_list = None
+        key = "<cwd>"
+    else:
+        config_file_list = get_config_file_list(Path(working_directory))
+        if len(config_file_list) > 0:
+            key = str(config_file_list[0].parent)
+        else:
+            key = "_default"
+    if key not in _configs:
+        _configs[key] = ConfigurationNode(
+            _read_default_config_files(config_file_list=config_file_list)
+        )
+    return _configs[key]
