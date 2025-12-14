@@ -264,6 +264,8 @@ class SimpleErrExperimentSimulation:
             return
         if not self.work_folder.is_dir():
             self.work_folder.mkdir(parents=True)
+        
+        do_wavefield = False
         sf_config = SPECFEMConfiguration(
             title="Simple Error Experiment (Acoustic / Elastic) Generated Mesh",
             description="",
@@ -280,7 +282,7 @@ class SimpleErrExperimentSimulation:
                 steps_between_store=self._config.steps_between_wavefield_write,
                 output_format="HDF5",
                 output_folder="OUTPUT_FILES/wavefield",
-            ),
+            ) if do_wavefield else None,
             sources_config=SimulationSourcesConfiguration(
                 source_list=self._sources
             ),

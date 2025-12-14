@@ -2,33 +2,68 @@ import reload_configurations
 import setup_sims
 
 reload_configurations.reload()
+num_configs = reload_configurations.num_configurations
+
+truesol_gridsim = reload_configurations.truesol_gridsim()
+
+sim_from_simname = {
+  setup_sims.test_config_fol_from_confindex(
+    i,
+    nx_below = cfg["nx_below"],
+    nx_above = cfg["nx_above"],
+    dt = cfg["dt"],
+    do_nonconforming = cfg["do_nonconforming"],
+  ).stem:cfg for i in range(num_configs) for cfg in reload_configurations.get_gridsims(i)
+}
+
+for i in range(num_configs):
+  sim_from_simname[setup_sims.test_config_fol_from_confindex(i,
+    nx_below = truesol_gridsim["nx_below"],
+    nx_above = truesol_gridsim["nx_above"],
+    dt = truesol_gridsim["dt"],
+    do_nonconforming = truesol_gridsim["do_nonconforming"],
+  ).stem] = truesol_gridsim
+
 
 rule all:
   input:
-    "sims/0_20_20_0x01_False/specfem_log.txt",
-    "sims/1_20_20_0x01_False/specfem_log.txt",
-    "sims/2_20_20_0x01_False/specfem_log.txt"
+    expand("sims/{simname}/specfem_log.txt", simname=sim_from_simname.keys())
 
-rule init_mesher:
+rule run_mesher:
   input:
-    "configurations/config_{iconf}.yaml",
+    "configurations/config_{iconf,[\\d]+}.yaml",
     "setup_sims.py"
   output:
-    "sims/{iconf}_20_20_0x01_False/database.bin"
+    "sims/{iconf,[\\d]+}_{simsuff}/database.bin"
   run:
-    conf = setup_sims.test_config_from_confindex(wildcards.iconf, nx_above=20, nx_below=20, dt=0.01, do_nonconforming=False)
+    simname = f"{wildcards.iconf}_{wildcards.simsuff}"
+    cfg = sim_from_simname[simname]
+    conf = setup_sims.test_config_from_confindex(
+      wildcards.iconf, 
+      nx_below = cfg["nx_below"],
+      nx_above = cfg["nx_above"],
+      dt = cfg["dt"],
+      do_nonconforming = cfg["do_nonconforming"]
+    )
     conf.write_topofile()
     conf.write_meshfem_parfile()
     conf.write_specfem_parfile()
     conf.generate_mesh()
-    conf.run_sim()
 
-rule run_mesher:
+rule run_sim:
   input:
-    "sims/{iconf}_20_20_0x01_False/database.bin"
+    "sims/{simname}/database.bin"
   output:
-    "sims/{iconf}_20_20_0x01_False/specfem_log.txt"
+    "sims/{simname}/specfem_log.txt"
   run:
-    conf = setup_sims.test_config_from_confindex(wildcards.iconf, nx_above=20, nx_below=20, dt=0.01, do_nonconforming=False)
+    cfg = sim_from_simname[wildcards.simname]
+    iconf = int(wildcards.simname.split("_")[0])
+    conf = setup_sims.test_config_from_confindex(
+      iconf, 
+      nx_below = cfg["nx_below"],
+      nx_above = cfg["nx_above"],
+      dt = cfg["dt"],
+      do_nonconforming = cfg["do_nonconforming"]
+    )
     conf.run_sim()
   
