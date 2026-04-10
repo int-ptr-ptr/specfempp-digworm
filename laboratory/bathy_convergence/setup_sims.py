@@ -1,9 +1,11 @@
+import itertools
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+import scipy as sp
 from yaml import Loader, load
 
 from specfempp_digworm.config.config import get_config
@@ -35,25 +37,21 @@ labdir = Path(__file__).parent
 config_folder = labdir / "configurations"
 # topofile_dir = labdir / "topofiles"
 
-SIM_XMIN = -np.pi
-SIM_XMAX = np.pi
+PT_SOURCE_FILE = labdir / "line_source.yaml"
+
+SIM_XMIN = 0
+SIM_XMAX = 20_000
+SIM_YMIN = 0
+SIM_YMID = 4963.982035928144
+SIM_YMAX = 9_600
 
 
 @dataclass(frozen=True)
 class SimpleErrExperimentConfiguration:
-    harmonic: int
-    ymin: float
-    ymax: float
-    a0: float
     nx_below: int
     nx_above: int
-    vp_below: float
-    vs_below: float
-    vp_above: float
-    source_f0: float
     dt: float
     num_steps: int
-    steps_between_wavefield_write: int
     is_nonconforming: bool
     workfol: Path
 
@@ -68,11 +66,6 @@ class SimpleErrExperimentConfiguration:
 class SimpleErrExperimentSimulation:
     @dataclass(frozen=True)
     class MeshConfig:
-        xmin: float
-        xmax: float
-        ymin: float
-        ymax: float
-
         nx_below: int
         nx_above: int
         nz_below: int
@@ -91,7 +84,6 @@ class SimpleErrExperimentSimulation:
     _material_elastic: MaterialModelAcousticElastic
     _material_acoustic: MaterialModelAcousticElastic
     _receiver_sets: list[ReceiverSeries]
-    _sources: list[SourceConfiguration]
 
     _mesh_config: "SimpleErrExperimentSimulation.MeshConfig"
     _external_mesh_file_config: ExternalMesherFileConfig | None
@@ -120,7 +112,6 @@ class SimpleErrExperimentSimulation:
         self,
         config: SimpleErrExperimentConfiguration,
         receivers: list[ReceiverSeries],
-        source_locations: list[tuple[float, float]],
     ):
         self._config = config
         self._topofile_name = "topo.dat"
@@ -129,36 +120,29 @@ class SimpleErrExperimentSimulation:
         self._database_filename = "database.bin"
         self._specfem_config_filename = "specfem_config.yaml"
         self._material_elastic = MaterialModelAcousticElastic(
-            rho=1, vp=self._config.vp_below, vs=self._config.vs_below
+            rho=2500, vp=3400, vs=1963
         )
         self._material_acoustic = MaterialModelAcousticElastic(
-            rho=1, vp=self._config.vp_above, vs=0
+            rho=1020, vp=1500, vs=0
         )
         self._receiver_sets = receivers
 
-        xlow = SIM_XMIN
-        xhigh = SIM_XMAX
-
         self._mesh_config = SimpleErrExperimentSimulation.MeshConfig(
-            xmin=xlow,
-            xmax=xhigh,
-            ymin=self._config.ymin,
-            ymax=self._config.ymax,
             is_nonconforming=self._config.is_nonconforming,
             nx_below=self._config.nx_below,
             nx_above=self._config.nx_above,
             nz_below=int(
                 np.round(
                     self._config.nx_below
+                    * (SIM_YMID - SIM_YMIN)
                     / (SIM_XMAX - SIM_XMIN)
-                    * abs(self._config.ymin)
                 )
             ),
             nz_above=int(
                 np.round(
                     self._config.nx_above
+                    * (SIM_YMAX - SIM_YMID)
                     / (SIM_XMAX - SIM_XMIN)
-                    * self._config.ymax
                 )
             ),
         )
@@ -172,53 +156,35 @@ class SimpleErrExperimentSimulation:
             else None
         )
 
-        self._sources = [
-            SourceType.FORCE(
-                x=x,
-                z=z,
-                forcing_function=ForcingFunction.RICKER,
-                factor=1.0,
-                tshift=0.0,
-                f0=self._config.source_f0,
-            )
-            for x, z in source_locations
-        ]
-
     def write_topofile(self, overwrite: bool = True):
         if self.topography_file.exists() and not overwrite:
             return
         if not self.work_folder.is_dir():
             self.work_folder.mkdir(parents=True)
-        xpts = np.linspace(
-            self._mesh_config.xmin,
-            self._mesh_config.xmax,
-            max(self._mesh_config.nx_below, self._mesh_config.nx_above) * 4,
-        )
-        if self._config.harmonic >= 0:
-            bathy = self._config.a0 * np.cos(self._config.harmonic * xpts)
-        else:
-            # custom bathymetry
-            def bathy_func(x):
-                x = x[..., None]
-                A = np.array([1, 0.13, 0.1, 0.05, 0.01])
-                F = np.array([0.5, 3, 4, 5, 10])
-                P = np.array([0, 3, 1.2, -1, 0.5])
-                return self._config.a0 * (
-                    np.sum(A * np.cos(F * x + P), axis=-1)
-                )
 
-            bathy = bathy_func(xpts)
+        loaded_topo = np.loadtxt(labdir / "topography_file_orig.dat")
+        xmin = 0
+        xmax = 20_000
+        ymin = 0
+        ymax = 9_600
+
+        numsamples = max(self._config.nx_above, self._config.nx_below) * 3
+        topo_spline = sp.interpolate.CubicSpline(
+            x=loaded_topo[:, 0], y=loaded_topo[:, 1]
+        )
+
+        xsamp = np.linspace(xmin, xmax, numsamples)
 
         topoconfig = TopographyConfig(
             [
                 [
-                    (self._mesh_config.xmin, self._mesh_config.ymin),
-                    (self._mesh_config.xmax, self._mesh_config.ymin),
+                    (xmin, ymin),
+                    (xmax, ymin),
                 ],
-                list(zip(xpts, bathy, strict=True)),
+                list(zip(xsamp, topo_spline(xsamp), strict=True)),
                 [
-                    (self._mesh_config.xmin, self._mesh_config.ymax),
-                    (self._mesh_config.xmax, self._mesh_config.ymax),
+                    (xmin, ymax),
+                    (xmax, ymax),
                 ],
             ],
             [self._mesh_config.nz_below, self._mesh_config.nz_above],
@@ -227,6 +193,11 @@ class SimpleErrExperimentSimulation:
         topoconfig.export(self.topography_file)
 
     def write_meshfem_parfile(self, overwrite: bool = True):
+        xmin = 0
+        xmax = 20_000
+        ymin = 0
+        ymax = 9_600
+
         if self.meshfem_parfile.exists() and not overwrite:
             return
         if not self.work_folder.is_dir():
@@ -243,8 +214,8 @@ class SimpleErrExperimentSimulation:
             external_mesher_files=self._external_mesh_file_config,
             internal_mesher_config=InternalMesherConfig(
                 topography_file=self._topofile_name,
-                xmin=self._mesh_config.xmin,
-                xmax=self._mesh_config.xmax,
+                xmin=xmin,
+                xmax=xmax,
                 nx=self._mesh_config.nx_below,
                 do_stacey_absorbing=False,
                 absorbing_bottom=False,
@@ -278,7 +249,6 @@ class SimpleErrExperimentSimulation:
         if not self.work_folder.is_dir():
             self.work_folder.mkdir(parents=True)
 
-        do_wavefield = False
         sf_config = SPECFEMConfiguration(
             title="Simple Error Experiment (Acoustic / Elastic) Generated Mesh",
             description="",
@@ -291,15 +261,9 @@ class SimpleErrExperimentSimulation:
                 stations_input_file=self._stations_filename,
             ),
             display_config=None,
-            wavefield_config=WavefieldOutputConfiguration(
-                steps_between_store=self._config.steps_between_wavefield_write,
-                output_format="HDF5",
-                output_folder="OUTPUT_FILES/wavefield",
-            )
-            if do_wavefield
-            else None,
+            wavefield_config=None,
             sources_config=SimulationSourcesConfiguration(
-                source_list=self._sources
+                source_file=str(PT_SOURCE_FILE)
             ),
             database_input_file=self._database_filename,
         )
@@ -379,8 +343,7 @@ class SimpleErrExperimentSimulation:
             )
 
 
-def test_config_fol_from_confindex(
-    iconf: int,
+def test_config_fol(
     *,
     nx_below: int,
     nx_above: int,
@@ -388,46 +351,31 @@ def test_config_fol_from_confindex(
     do_nonconforming: bool,
 ):
     return labdir / (
-        f"sims/{iconf}_{nx_below}_{nx_above}_"
+        f"sims/{nx_below}_{nx_above}_"
         f"{str(dt).replace('.', 'x')}_{do_nonconforming}"
     )
 
 
-def test_config_from_confindex(
-    iconf: int,
+SIM_TMAX = 16.25
+
+
+def test_config(
     *,
     nx_below: int,
     nx_above: int,
     dt: float,
     do_nonconforming: bool,
 ):
-    config_file = config_folder / f"config_{iconf}.yaml"
-    with config_file.open("r") as f:
-        loaded_config = load(f, Loader=Loader)
-
-    num_steps = int(np.ceil(float(loaded_config["tmax"]) / dt))
-    source_f0 = float(loaded_config["source_f0"])
-    dump_dt = 1e-2 / source_f0
-    dump_nstep = int(max(1, np.floor(dump_dt / dt)))
+    num_steps = int(np.ceil(float(SIM_TMAX) / dt))
 
     return SimpleErrExperimentSimulation(
         SimpleErrExperimentConfiguration(
-            harmonic=int(loaded_config["harmonic"]),
-            ymin=-np.pi,
-            ymax=np.pi,
-            a0=float(loaded_config["a0"]),
             nx_below=nx_below,
             nx_above=nx_above,
-            vp_below=float(loaded_config["vp_below"]),
-            vs_below=float(loaded_config["vs_below"]),
-            vp_above=float(loaded_config["vp_above"]),
-            source_f0=source_f0,
             dt=dt,
             num_steps=num_steps,
-            steps_between_wavefield_write=dump_nstep,
             is_nonconforming=do_nonconforming,
-            workfol=test_config_fol_from_confindex(
-                iconf=iconf,
+            workfol=test_config_fol(
                 nx_below=nx_below,
                 nx_above=nx_above,
                 dt=dt,
@@ -435,10 +383,274 @@ def test_config_from_confindex(
             ),
         ),
         receivers=[
-            ReceiverSeries.from_dict(d) for d in loaded_config["receivers"]
-        ],
-        source_locations=[
-            (float(loc["x"]), float(loc["z"]))
-            for loc in loaded_config["source_locations"]
+            ReceiverSeries(
+                nrec=5, xdeb=11_000, zdeb=4000, xfin=11_000, zfin=6000
+            ),
+            ReceiverSeries(
+                nrec=5, xdeb=9_000, zdeb=4000, xfin=9_000, zfin=6000
+            ),
+            ReceiverSeries(
+                nrec=2, xdeb=10_000, zdeb=5.480e03, xfin=10_000, zfin=8.082e03
+            ),
         ],
     )
+
+
+def truesol_gridsim():
+    nx_above = 1500
+    nx_below = 1500
+    # nx_above = 400
+    # nx_below = 400
+
+    speed_above = 1963 / 3400
+    speed_below = 1
+
+    # cfl = u * dt / dx
+
+    cfl = 0.00625
+    dt = cfl * np.pi * 2 / max(nx_above * speed_above, nx_below * speed_below)
+    return {
+        "nx_above": nx_above,
+        "nx_below": nx_below,
+        "dt": dt,
+        "do_nonconforming": False,
+    }
+
+
+def get_gridsims():
+    gridsims = []
+
+    def add_param(abovefac, belowfac, nonconforming, cfl):
+
+        for base_mult in [100, 40]:
+            nx_above = abovefac * base_mult
+            nx_below = belowfac * base_mult
+
+            speed_above = 1963 / 3400
+            speed_below = 1
+
+            # cfl = u * dt / dx
+
+            cfl = 0.00625
+            dt = (
+                cfl
+                * np.pi
+                * 2
+                / max(nx_above * speed_above, nx_below * speed_below)
+            )
+            gridsims.append(
+                {
+                    "nx_above": nx_above,
+                    "nx_below": nx_below,
+                    "do_nonconforming": nonconforming,
+                    "dt": dt,
+                }
+            )
+
+    for fac in [1, 2, 4, 8]:
+        for cfl in [0.025, 0.00625]:
+            add_param(fac, fac, False, cfl)
+
+    facs = [
+        # lean correct
+        (2, 1),
+        (3, 2),
+        (4, 3),
+        (5, 3),
+        (7, 3),
+        (7, 5),
+        (8, 5),
+        (9, 5),
+        # lean opposite
+        (3, 4),
+        (3, 5),
+        (3, 7),
+        (5, 9),
+        # roughly equal
+        (1, 1),
+        (2, 2),
+        (6, 5),
+        (9, 8),
+        # extremes
+        # (2, 8),
+        # (8, 2),
+    ]
+
+    facs.extend(
+        [
+            (1, 4),
+            (4, 1),
+        ]
+    )
+    filt = 1.5
+    facs = [
+        (nx1, nx2)
+        for nx1, nx2 in facs
+        if (abs(np.log2(nx1 / nx2)) < filt + 1e-4)
+    ]
+
+    for base_mult in [100, 40]:
+
+        for abovefac, belowfac in facs:
+            nx_above = abovefac * base_mult
+            nx_below = belowfac * base_mult
+
+            speed_above = 1963 / 3400
+            speed_below = 1
+
+            for cfl in [0.025, 0.00625]:
+                # cfl = u * dt / dx
+                dt = (
+                    cfl
+                    * np.pi
+                    * 2
+                    / max(nx_above * speed_above, nx_below * speed_below)
+                )
+                gridsims.append(
+                    {
+                        "nx_above": nx_above,
+                        "nx_below": nx_below,
+                        "do_nonconforming": True,
+                        "dt": dt,
+                    }
+                )
+    
+    return gridsims
+
+
+# ==============================================================================
+# manual run
+# ==============================================================================
+def run_sims():
+    import sys
+    import time
+    from multiprocessing import Process
+
+    queued_meshgen_tasks = []
+    meshgen_tasks = []
+    queued_run_tasks = []
+    run_tasks = []
+
+    max_meshgen_tasks = 6
+    max_run_tasks = 1
+
+    for sim_params in itertools.chain(
+        get_gridsims(),
+        [truesol_gridsim()],
+    ):
+        conf = test_config(**sim_params)
+        if not (conf.work_folder / conf._database_filename).exists():
+            print(  # noqa: T201
+                f"Queued mesh generation for {sim_params}"
+            )
+            queued_meshgen_tasks.append(
+                (sim_params, conf, Process(target=conf.generate_mesh))
+            )
+        elif not (conf.work_folder / "specfem_log.txt").exists():
+            queued_run_tasks.append(
+                (sim_params, conf, Process(target=conf.run_sim))
+            )
+
+    while (
+        queued_meshgen_tasks or meshgen_tasks or queued_run_tasks or run_tasks
+    ):
+        changes = []
+
+        # read completed meshgen tasks
+        completed_inds = []
+        for itask, (sim_params, conf, proc) in enumerate(meshgen_tasks):
+            if proc.exitcode is None:
+                # not yet complete
+                continue
+
+            if proc.exitcode != 0:
+                exitcode = proc.exitcode
+                print(f"!!! Error with mesher {conf.work_folder}. Exiting!")  # noqa: T201
+                for p in meshgen_tasks:
+                    p[-1].terminate()
+                for p in run_tasks:
+                    p[-1].terminate()
+                for p in meshgen_tasks:
+                    p[-1].join()
+                    p[-1].close()
+                for p in run_tasks:
+                    p[-1].join()
+                    p[-1].close()
+                sys.exit(exitcode)
+
+            completed_inds.append(itask)
+            proc.join()
+            proc.close()
+            if not (conf.work_folder / "specfem_log.txt").exists():
+                changes.append(
+                    f"Queued sim run for {sim_params}\n {conf.work_folder}"
+                )
+                queued_run_tasks.append(
+                    (sim_params, conf, Process(target=conf.run_sim))
+                )
+        for ind in reversed(completed_inds):
+            del meshgen_tasks[ind]
+
+        # fill meshrun task queue
+        while len(meshgen_tasks) < max_meshgen_tasks and queued_meshgen_tasks:
+            p = queued_meshgen_tasks.pop()
+            p[-1].start()
+            changes.append(f"Started mesh generation for {p[0]}")
+
+            meshgen_tasks.append(p)
+
+        # read completed run tasks
+        completed_inds = []
+        for itask, (sim_params, conf, proc) in enumerate(run_tasks):
+            if proc.exitcode is None:
+                # not yet complete
+                continue
+
+            if proc.exitcode != 0:
+                print(f"!!! Error with runner {conf.work_folder}.")  # noqa: T201
+            completed_inds.append(itask)
+            proc.join()
+            proc.close()
+            changes.append(f"Completed simulation for {sim_params}")
+        for ind in reversed(completed_inds):
+            del run_tasks[ind]
+
+        # fill run task queue
+        while len(run_tasks) < max_run_tasks and queued_run_tasks:
+            p = queued_run_tasks.pop()
+            p[-1].start()
+            changes.append(f"Started sim run for {p[0]}")
+
+            run_tasks.append(p)
+
+        if changes:
+            updatestr = (
+                "==============================\n"
+                "Update:\n"
+                "==============================\n"
+            )
+
+            for change in changes:
+                updatestr += "  - " + change + "\n"
+
+            updatestr += (
+                "==============================\n"
+                "meshes being generated:\n"
+                + "".join(
+                    "- " + str(p[1].work_folder) + "\n" for p in meshgen_tasks
+                )
+                + f"with {len(queued_meshgen_tasks)} queued.\n"
+                + "==============================\nsims being run:\n"
+                + "".join(
+                    "- " + str(p[1].work_folder) + "\n" for p in run_tasks
+                )
+                + f"with {len(queued_run_tasks)} queued.\n"
+                + "==============================\n"
+            )
+            print(updatestr)  # noqa: T201
+
+        time.sleep(1)
+
+
+if __name__ == "__main__":
+    run_sims()

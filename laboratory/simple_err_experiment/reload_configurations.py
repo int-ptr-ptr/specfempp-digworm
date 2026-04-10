@@ -32,7 +32,7 @@ configurations = [
                 source_f0=2,
             )
         )
-        for harmonic in [1, 2, 3, 5]
+        for harmonic in [-1, 1, 2, 3, 5]
     ],
 ]
 num_configurations = len(configurations)
@@ -44,7 +44,7 @@ def reload():
         config_folder.mkdir(parents=True)
 
     # iterate existing files
-    for iconf in itertools.count(1):
+    for iconf in itertools.count(start=0, step=1):
         config_file = config_folder / f"config_{iconf}.yaml"
 
         config_current = (
@@ -153,22 +153,33 @@ def get_gridsims(iconf: int):
         # (2, 8),
         # (8, 2),
     ]
-    if iconf < 3:
+
+    harmonic = configurations[iconf]["harmonic"]
+
+    if harmonic < 3:
         facs.extend(
             [
                 (1, 4),
                 (4, 1),
             ]
         )
-    if iconf < 2:
+    if harmonic < 2:
         facs.extend(
             [
                 (1, 6),
                 (6, 1),
             ]
         )
-    else:
-        facs = [(nx1,nx2) for nx1,nx2 in facs if nx1 > 3 and nx2 > 3]
+    if harmonic >= 3 or harmonic < 0:
+        filt = 2.5
+
+        if harmonic > 3:
+            filt = 0.6
+        facs = [
+            (nx1, nx2)
+            for nx1, nx2 in facs
+            if (abs(np.log2(nx1 / nx2)) < filt + 1e-4)
+        ]
 
     for abovefac, belowfac in facs:
         nx_above = abovefac * 20
