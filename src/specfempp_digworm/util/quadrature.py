@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 import numpy as np
 
 
@@ -120,8 +122,9 @@ def get_knots(n):
     return roots
 
 
-def build_lagrange_polys(n):
-    knots = get_knots(n)
+def build_lagrange_polys(n, knots=None):
+    if knots is None:
+        knots = get_knots(n)
 
     L = [[1]] * (n + 1)
     for i in range(n + 1):
@@ -131,7 +134,11 @@ def build_lagrange_polys(n):
     return L
 
 
-def get_lagrange_weights(n):
+def lagrange_weights_from_polys(L):
+    return np.array(_polyinteg(poly) for poly in L)
+
+
+def get_GLL_weights(n):
     knots = get_knots(n)
     P = leg(n)
     # the factor of (n+0.5) is undoing our normalization of P
@@ -140,7 +147,8 @@ def get_lagrange_weights(n):
     )
 
 
-class GLL:
+@dataclass(frozen=True)
+class Quadrature:
     degree: int
     L: np.ndarray
     Lp: np.ndarray
@@ -154,20 +162,44 @@ class GLL:
     def nquad(self):
         return self.degree + 1
 
-    def __init__(self, degree: int):
-        self.degree = degree
-        self.knots = get_knots(degree)
-        self.weights = get_lagrange_weights(degree)
+    def __init__(self, knots) -> None:
+        object.__setattr__(self, "knots", np.array(knots))
 
-        self.L = np.array(build_lagrange_polys(degree))
-        self.Lp = np.array(polyderiv(self.L.T)).T
-        self.Lpp = np.array(polyderiv(self.Lp.T)).T
-
-        self.Lp_at_knots = np.einsum(
-            "nk,ka->na",
-            self.Lp,
-            self.knots[np.newaxis, :] ** np.arange(degree)[:, np.newaxis],
+        object.__setattr__(self, "degree", len(knots))
+        object.__setattr__(
+            self,
+            "L",
+            np.array(build_lagrange_polys(self.degree, knots=self.knots)),
         )
+        object.__setattr__(self, "weights", lagrange_weights_from_polys(self.L))
+
+        object.__setattr__(self, "Lp", np.array(polyderiv(self.L.T)).T)
+        object.__setattr__(self, "Lpp", np.array(polyderiv(self.Lp.T)).T)
+        object.__setattr__(
+            self,
+            "Lp_at_knots",
+            np.einsum(
+                "nk,ka->na",
+                self.Lp,
+                self.knots[np.newaxis, :]
+                ** np.arange(self.degree)[:, np.newaxis],
+            ),
+        )
+
+        self.knots.setflags(write=False)
+        self.weights.setflags(write=False)
+        self.Lp.setflags(write=False)
+        self.Lpp.setflags(write=False)
+        self.Lp_at_knots.setflags(write=False)
+
+
+class GLL(Quadrature):
+    @property
+    def nquad(self):
+        return self.degree + 1
+
+    def __init__(self, degree: int):
+        super().__init__(get_knots(degree))
 
 
 # class GLL2D:
