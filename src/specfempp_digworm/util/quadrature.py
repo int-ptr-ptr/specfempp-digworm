@@ -165,7 +165,7 @@ class Quadrature:
     def __init__(self, knots) -> None:
         object.__setattr__(self, "knots", np.array(knots))
 
-        object.__setattr__(self, "degree", len(knots))
+        object.__setattr__(self, "degree", len(knots) - 1)
         object.__setattr__(
             self,
             "L",
@@ -191,6 +191,19 @@ class Quadrature:
         self.Lp.setflags(write=False)
         self.Lpp.setflags(write=False)
         self.Lp_at_knots.setflags(write=False)
+
+    def interpolate(self, x):
+        """Computes the Lagrange interpolating polynomials of this quadrature
+        at the given points `x`. L_i(x[...]) is given by
+        interpolate(x)[...,i].
+        """
+        xarr = np.array(x)[..., None]
+        result = np.empty((*xarr.shape[:-1], self.nquad), dtype=xarr.dtype)
+        result[...] = self.L[:, -1]
+        for i in range(self.nquad - 2, -1, -1):
+            result[...] = result[...] * xarr + self.L[:, i]
+
+        return result
 
 
 class GLL(Quadrature):
